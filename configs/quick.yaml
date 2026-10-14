@@ -1,0 +1,49 @@
+# End-to-end plumbing check. This is not a research-quality budget.
+seed: 17
+data_dir: ./data
+output_dir: ./runs
+model:
+  vocab_size: 32000
+  hidden_size: 128
+  intermediate_size: 256
+  num_layers: 2
+  num_heads: 4
+  max_length: 512
+  dropout: 0.1
+  attention_window: 64
+  projection_rank: 16
+  segment_size: 128
+  memory_size: 128
+  compressed_memory_size: 32
+  compression_rate: 4
+train:
+  lengths: [128, 256, 512]
+  mlm_tokens: 1048576
+  batch_tokens: 4096
+  eval_batch_tokens: 8192
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  warmup_ratio: 0.06
+  epochs: 1
+  max_steps: 20
+  gradient_checkpointing: false
+  compile: false
+  num_workers: 2
+  log_every: 5
+  save_every: 20
+  checkpoint_tokens: [262144, 524288, 1048576]
+  amp: auto
+  finetune_seeds: [17]
+monitoring:
+  enabled: true
+  project: longdoc-five-paper
+  mode: online
+  required: false
+  log_every_seconds: 5
+runtime:
+  resume: auto
+  checkpoint_every_minutes: 2
+  keep_last_checkpoints: 2
+  heartbeat_seconds: 20
+  min_free_disk_gb: 1
+  fail_fast: false

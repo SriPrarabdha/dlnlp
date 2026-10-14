@@ -1,0 +1,48 @@
+seed: 17
+data_dir: ./data
+output_dir: ./runs
+model:
+  vocab_size: 32000
+  hidden_size: 512
+  intermediate_size: 2048
+  num_layers: 4
+  num_heads: 8
+  max_length: 4096
+  dropout: 0.1
+  attention_window: 256
+  projection_rank: 64
+  segment_size: 512
+  memory_size: 512
+  compressed_memory_size: 128
+  compression_rate: 4
+train:
+  lengths: [512, 1024, 2048, 4096]
+  mlm_tokens: 200000000
+  batch_tokens: 16384
+  eval_batch_tokens: 32768
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  warmup_ratio: 0.06
+  epochs: 3
+  max_steps: null
+  gradient_checkpointing: true
+  compile: false
+  num_workers: 4
+  log_every: 20
+  save_every: 1000
+  checkpoint_tokens: [25000000, 50000000, 100000000, 200000000]
+  amp: auto
+  finetune_seeds: [17, 29, 43]
+monitoring:
+  enabled: true
+  project: longdoc-five-paper
+  mode: online
+  required: false
+  log_every_seconds: 15
+runtime:
+  resume: auto
+  checkpoint_every_minutes: 15
+  keep_last_checkpoints: 3
+  heartbeat_seconds: 60
+  min_free_disk_gb: 2
+  fail_fast: false
