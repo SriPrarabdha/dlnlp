@@ -26,3 +26,18 @@ def test_resume_rejects_a_changed_scientific_configuration(tmp_path: Path):
     changed.train.learning_rate *= 2
     with pytest.raises(ValueError, match="configuration does not match"):
         _resume_checkpoint(changed, run_dir)
+
+
+def test_resume_allows_changing_activation_checkpointing(tmp_path: Path):
+    original = RunConfig()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    checkpoint = run_dir / "checkpoint_last.pt"
+    torch.save(
+        {"config": original.to_dict(), "status": "completed"},
+        checkpoint,
+    )
+    changed = RunConfig()
+    changed.train.gradient_checkpointing = not original.train.gradient_checkpointing
+
+    assert _resume_checkpoint(changed, run_dir) == checkpoint

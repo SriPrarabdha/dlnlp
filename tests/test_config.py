@@ -1,6 +1,6 @@
 import pytest
 
-from longdoc.config import ModelConfig, RunConfig
+from longdoc.config import ModelConfig, RunConfig, stable_config_id
 
 
 def test_roformer_rejects_odd_head_dimension():
@@ -42,3 +42,11 @@ def test_compressed_memory_can_hold_one_compressed_segment():
     )
     with pytest.raises(ValueError, match="compressed_memory_size"):
         config.validate()
+
+
+def test_activation_checkpointing_does_not_change_scientific_config_id():
+    first = RunConfig()
+    second = RunConfig()
+    second.train.gradient_checkpointing = not first.train.gradient_checkpointing
+
+    assert stable_config_id(first) == stable_config_id(second)

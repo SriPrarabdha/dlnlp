@@ -182,6 +182,8 @@ class SuiteRunner:
         ignored = {"experiment", "task", "stage", "output_dir", "checkpoint", "monitoring", "runtime"}
         source_identity = {key: value for key, value in source.items() if key not in ignored}
         target_identity = {key: value for key, value in target.items() if key not in ignored}
+        source_identity.get("train", {}).pop("gradient_checkpointing", None)
+        target_identity.get("train", {}).pop("gradient_checkpointing", None)
         if source_identity != target_identity:
             raise ValueError(
                 "--reuse-pretraining-from is scientifically incompatible with this run: "

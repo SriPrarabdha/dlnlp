@@ -22,7 +22,7 @@ versions that do not invoke the PEP 660 editable-install hook. Upgrading the
 three packaging tools first is still recommended so editable installs use the
 modern `pyproject.toml` path.
 
-The harness runs on CPU, CUDA, and MPS. CUDA automatically uses BF16 when supported (FP16 otherwise), TF32 matrix multiplication, fused AdamW, pinned transfers, PyTorch scaled-dot-product attention, fully packed MLM batches, and gradient checkpointing. Set `train.compile=true` only after validating your installed PyTorch/CUDA combination; custom sparse operators do not benefit equally from compilation.
+The harness runs on CPU, CUDA, and MPS. CUDA automatically uses BF16 when supported (FP16 otherwise), TF32 matrix multiplication, fused AdamW, pinned transfers, PyTorch scaled-dot-product attention, fully packed MLM batches, masked-position-only vocabulary projection, and gradient checkpointing. On GPUs with enough memory, `--set train.gradient_checkpointing=false` avoids recomputation without changing the scientific configuration and is safe when resuming a checkpoint. Set `train.compile=true` only after validating your installed PyTorch/CUDA combination; custom sparse operators do not benefit equally from compilation.
 
 ## Prepare all data at a chosen location
 
@@ -38,7 +38,7 @@ This downloads:
 - LexGLUE SCOTUS and ECtHR-A with their official splits;
 - IMDB with its official test set and a fixed, stratified 2,500-example validation subset taken only from training; duplicate training documents and reviews that overlap test are removed before splitting.
 
-It loads immutable Hugging Face Parquet snapshots (so it is compatible with modern `datasets` releases), keeps the download cache under `/path/to/longdoc-data/cache`, normalizes each dataset under `/path/to/longdoc-data/datasets`, rejects exact documents shared across splits, writes provenance manifests, and trains the shared 32K byte-level BPE at `/path/to/longdoc-data/tokenizer/tokenizer.json`. Only training documents are exposed to tokenizer learning. The MLM iterator likewise reads only training splits and balances corpora and context lengths by processed non-padding tokens.
+It loads immutable Hugging Face Parquet snapshots (so it is compatible with modern `datasets` releases), keeps the download cache under `/path/to/longdoc-data/cache`, normalizes each dataset under `/path/to/longdoc-data/datasets`, removes exact cross-split overlaps with priority `test > validation > train`, verifies split isolation, writes the cleanup counts and provenance manifests, and trains the shared 32K byte-level BPE at `/path/to/longdoc-data/tokenizer/tokenizer.json`. Only training documents are exposed to tokenizer learning. The MLM iterator likewise reads only training splits and balances corpora and context lengths by processed non-padding tokens.
 
 Useful preparation options:
 

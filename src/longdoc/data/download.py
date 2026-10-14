@@ -68,8 +68,9 @@ def _add_imdb_validation(raw: Any, seed: int, validation_size: int) -> Any:
     return DatasetDict(train=split["train"], validation=split["test"], test=raw["test"])
 
 
-def _text_digest(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+def _text_digest(text: str | list[str]) -> str:
+    normalised = _normalise_text(text)
+    return hashlib.sha256(normalised.encode("utf-8", errors="replace")).hexdigest()
 
 
 def _deduplicate_imdb_training(raw: Any) -> tuple[Any, dict[str, int]]:
@@ -102,6 +103,36 @@ def _deduplicate_imdb_training(raw: Any) -> tuple[Any, dict[str, int]]:
         "removed_train_test_overlaps": removed_test_overlaps,
         "removed_train_duplicates": removed_train_duplicates,
         "deduplicated_train_rows": len(keep_indices),
+    }
+    return result, stats
+
+
+def _remove_cross_split_overlaps(raw: Any) -> tuple[Any, dict[str, Any]]:
+    """Remove documents from lower-priority splits when text overlaps.
+
+    Evaluation data has priority over fitting data: test, then validation,
+    then train. Repeated rows within one split are intentionally preserved;
+    arXiv uses them for papers assigned to more than one category.
+    """
+    from datasets import DatasetDict
+
+    priority = [split for split in ("test", "validation", "train") if split in raw]
+    priority.extend(split for split in raw if split not in priority)
+    claimed: set[str] = set()
+    cleaned: dict[str, Any] = {}
+    removed_by_split: dict[str, int] = {}
+    for split in priority:
+        digests = [_text_digest(text) for text in raw[split]["text"]]
+        keep_indices = [index for index, digest in enumerate(digests) if digest not in claimed]
+        removed = len(digests) - len(keep_indices)
+        cleaned[split] = raw[split].select(keep_indices) if removed else raw[split]
+        removed_by_split[split] = removed
+        claimed.update(digests)
+    result = DatasetDict({split: cleaned[split] for split in raw})
+    stats = {
+        "priority": priority,
+        "removed_by_split": removed_by_split,
+        "total_removed": sum(removed_by_split.values()),
     }
     return result, stats
 
@@ -147,8 +178,11 @@ def download_one(
     )
     preparation: dict[str, Any] = {}
     if name == "imdb":
-        raw, preparation = _deduplicate_imdb_training(raw)
+        raw, imdb_stats = _deduplicate_imdb_training(raw)
+        preparation["imdb_training_deduplication"] = imdb_stats
         raw = _add_imdb_validation(raw, seed, imdb_validation_size)
+    raw, overlap_stats = _remove_cross_split_overlaps(raw)
+    preparation["cross_split_deduplication"] = overlap_stats
     normalised = _normalise_dataset(raw, info)
     split_sizes = _validate_split_isolation(normalised, name)
 

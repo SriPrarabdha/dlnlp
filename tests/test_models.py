@@ -95,8 +95,14 @@ def test_mlm_head_has_expected_shape():
     labels = ids.clone()
     labels[:, ::2] = -100
     output = model(ids, mask, labels)
-    assert output.logits.shape == (2, 32, config.vocab_size)
+    assert output.logits.shape == (int((labels != -100).sum()), config.vocab_size)
     assert torch.isfinite(output.loss)
+    model.eval()
+    with torch.no_grad():
+        inference = model(ids, mask)
+        full_loss = model(ids, mask, labels).loss
+    assert inference.logits.shape == (2, 32, config.vocab_size)
+    torch.testing.assert_close(output.loss, full_loss)
 
 
 def test_longformer_straight_through_selector_receives_gradient():
@@ -110,6 +116,22 @@ def test_longformer_straight_through_selector_receives_gradient():
     assert scorer is model.encoder.layers[1].attention.scorer
     assert scorer.weight.grad is not None
     assert scorer.weight.grad.abs().sum() > 0
+
+
+def test_longformer_bfloat16_global_output_matches_local_dtype():
+    config = tiny_config("longformer")
+    config.global_selection = "learned"
+    model = build_model(config, "pretrain").to(dtype=torch.bfloat16)
+    ids = torch.randint(5, config.vocab_size, (2, config.max_length))
+    mask = torch.ones_like(ids, dtype=torch.bool)
+    labels = ids.clone()
+    labels[:, ::2] = -100
+
+    output = model(ids, mask, labels)
+    output.loss.backward()
+
+    assert output.logits.dtype == torch.bfloat16
+    assert torch.isfinite(output.loss)
 
 
 def test_rope_frequency_gates_start_at_identity():

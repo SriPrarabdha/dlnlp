@@ -286,5 +286,6 @@ def stable_config_id(config: RunConfig) -> str:
     # server job impossible to find when it is resumed with stricter flags.
     for key in ("output_dir", "stage", "monitoring", "runtime"):
         identity.pop(key, None)
+    identity.get("train", {}).pop("gradient_checkpointing", None)
     payload = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()[:12]

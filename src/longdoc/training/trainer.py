@@ -170,11 +170,15 @@ def _checkpoint_payload(
 def _validate_saved_config(saved_config: dict[str, Any], config: RunConfig, source: Path) -> None:
     saved_identity = dict(saved_config)
     current_identity = config.to_dict()
-    # These fields may safely change when relocating or operating a run;
-    # scientific/model/training fields may not.
+    # These fields may safely change when relocating or operating a run.
     for key in ("output_dir", "stage", "monitoring", "runtime"):
         saved_identity.pop(key, None)
         current_identity.pop(key, None)
+    # Activation checkpointing changes only the forward/backward execution
+    # strategy, not the model, batches, optimizer, or schedule. This lets a
+    # resumed job trade memory for speed after moving to a larger GPU.
+    for identity in (saved_identity, current_identity):
+        identity.get("train", {}).pop("gradient_checkpointing", None)
     if saved_identity != current_identity:
         raise ValueError(
             f"Saved configuration does not match the current run: {source}. "

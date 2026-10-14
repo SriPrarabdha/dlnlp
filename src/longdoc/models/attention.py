@@ -272,7 +272,9 @@ class LongformerAttention(nn.Module):
         )
         global_output = global_output * gate[:, None, :, None]
         previous = output.gather(2, gather)
-        global_output = torch.where(global_valid[:, None, :, None], global_output, previous)
+        global_output = torch.where(
+            global_valid[:, None, :, None], global_output, previous
+        ).to(output.dtype)
         output = output.scatter(2, gather, global_output)
         output = output * attention_mask[:, None, :, None]
         valid_query_count = attention_mask.sum().clamp_min(1) * self.heads

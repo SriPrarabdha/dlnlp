@@ -67,6 +67,22 @@ Replace `longformer` with any of the other four names. A full configuration mean
 
 The terminal and log file show a rolling ETA. W&B groups all jobs under `<paper>/<run-id>` and gives each task, seed, benchmark, and ablation a stable resumable run identity.
 
+On a high-memory GPU, disable activation checkpointing to trade memory for
+throughput while keeping the same token batches and optimizer schedule:
+
+```bash
+run_experiment \
+  --experiment head_to_head --run-id main \
+  --data-dir /mnt/datasets/longdoc \
+  --output-dir /mnt/results/longdoc \
+  --device cuda \
+  --set train.gradient_checkpointing=false
+```
+
+This compute-only setting may be changed when resuming. Increasing
+`train.batch_tokens`, in contrast, changes the number of optimizer updates for
+the fixed MLM token budget and should be treated as a new scientific run.
+
 For Slurm, ask the scheduler to warn the process before its time limit so the signal-aware checkpoint path runs:
 
 ```bash

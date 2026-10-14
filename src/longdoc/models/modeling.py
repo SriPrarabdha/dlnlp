@@ -399,16 +399,32 @@ class LongDocumentForMLM(nn.Module):
         self, input_ids: torch.Tensor, attention_mask: torch.Tensor, labels: torch.Tensor | None = None
     ) -> ModelOutput:
         encoded = self.encoder(input_ids, attention_mask)
-        logits = self.decoder(self.mlm_norm(encoded.hidden))
-        loss = None
-        if labels is not None:
+        if self.training and labels is not None:
+            # Only masked positions contribute to MLM loss. Projecting every
+            # token into a 32K-word vocabulary wastes most decoder compute and
+            # activation memory while producing exactly zero gradient for the
+            # ignored positions.
+            selected = labels != -100
+            logits = self.decoder(self.mlm_norm(encoded.hidden[selected]))
             loss = (
-                F.cross_entropy(
-                    logits.reshape(-1, logits.shape[-1]), labels.reshape(-1), ignore_index=-100
-                )
-                if (labels != -100).any()
+                F.cross_entropy(logits, labels[selected])
+                if selected.any()
                 else logits.sum() * 0.0
             )
+        else:
+            # Preserve full-token logits for inference and diagnostics.
+            logits = self.decoder(self.mlm_norm(encoded.hidden))
+            loss = None
+            if labels is not None:
+                loss = (
+                    F.cross_entropy(
+                        logits.reshape(-1, logits.shape[-1]),
+                        labels.reshape(-1),
+                        ignore_index=-100,
+                    )
+                    if (labels != -100).any()
+                    else logits.sum() * 0.0
+                )
         return ModelOutput(loss, logits, encoded.diagnostics)
 
 
