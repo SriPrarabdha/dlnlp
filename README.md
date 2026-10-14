@@ -36,9 +36,9 @@ This downloads:
 
 - `ccdv/arxiv-classification` (`no_ref`, authoritative train/validation/test split);
 - LexGLUE SCOTUS and ECtHR-A with their official splits;
-- IMDB with its official test set and a fixed, stratified 2,500-example validation subset taken only from training.
+- IMDB with its official test set and a fixed, stratified 2,500-example validation subset taken only from training; duplicate training documents and reviews that overlap test are removed before splitting.
 
-It keeps the download cache under `/path/to/longdoc-data/cache`, normalizes each dataset under `/path/to/longdoc-data/datasets`, rejects exact documents shared across splits, writes provenance manifests, and trains the shared 32K byte-level BPE at `/path/to/longdoc-data/tokenizer/tokenizer.json`. Only training documents are exposed to tokenizer learning. The MLM iterator likewise reads only training splits and balances corpora and context lengths by processed non-padding tokens.
+It loads immutable Hugging Face Parquet snapshots (so it is compatible with modern `datasets` releases), keeps the download cache under `/path/to/longdoc-data/cache`, normalizes each dataset under `/path/to/longdoc-data/datasets`, rejects exact documents shared across splits, writes provenance manifests, and trains the shared 32K byte-level BPE at `/path/to/longdoc-data/tokenizer/tokenizer.json`. Only training documents are exposed to tokenizer learning. The MLM iterator likewise reads only training splits and balances corpora and context lengths by processed non-padding tokens.
 
 Useful preparation options:
 
