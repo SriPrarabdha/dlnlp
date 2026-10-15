@@ -113,6 +113,8 @@ So short and long documents are summarised by effectively different recipes, and
 | Reports and plots | `src/longdoc/plotting.py` (Linformer plots at lines ~336–346), `src/longdoc/reporting.py` |
 | Settings | `configs/base.yaml` (real runs), `configs/quick.yaml` (plumbing test only) |
 | Checkpoint cleanup for small disks (added for Tejash) | `scripts/compact_finished.py` |
+| Cluster job script for KAIC (Slurm), with Tejash's paths | `scripts/linformer_kaic.sbatch` |
+| One-time cluster check job (GPU, data checksums, unit tests, 10-minute smoke run) | `scripts/linformer_kaic_check.sbatch` |
 | Command-line entry points | `run_experiment` (= `src/longdoc/cli.py`), `longdoc-data` / `download_data.py` |
 
 ---
@@ -575,7 +577,12 @@ The other GPUs' times are scaled from the 3090 measurement. Part of every step i
 
 ### 12.2 Storage plan: "Option B" (chosen; Tejash has a 75 GB quota)
 
-1. **Copy only the needed data** (2.3 GB): `datasets/`, `tokenizer/`, `manifest.json`.
+1. **The data is prepared on Tejash's local machine and copied to the cluster.** Tejash cannot run Python on the cluster login node, so the cluster never downloads anything.
+   - **On the local machine** (fustionstor3), the transfer-ready folder is `/home/tejashmore/dlnlp/data/` (git-ignored, 2.3 GB, 51 files). It holds `datasets/`, `tokenizer/`, `manifest.json` and `SHA256SUMS`, a checksum list. The 4.6 GB download `cache/` is left out, because training never reads it.
+   - **On the cluster**, it is copied with `rsync` into `/scratch/users/rajivs/datasets_rajivs/tejash_temp`, the `--data-dir`. Only data lives there.
+   - **The copy is verified** with `sha256sum -c SHA256SUMS`, which needs no Python.
+   - **The folder is relocatable.** A copy at a new path was verified with the checksums, the unit tests and the full 29-job smoke run [measured].
+   - **Everything else** (code, environment, results, logs) lives under `/home/rajivs/tejashmore/` (section 12.3).
 2. **Add `--set runtime.keep_last_checkpoints=0`.** Step checkpoints are deleted as soon as the next one is written; the newest state survives as `checkpoint_latest.pt`, so resume still works (tested).
 3. **Run `scripts/compact_finished.py` every 10 minutes alongside the suite.** For runs whose `completion.json` says "completed":
    - **Fine-tuning folders:** it keeps only `checkpoint_best.pt` as weights only, and deletes the last, latest and step copies.
@@ -585,37 +592,61 @@ The other GPUs' times are scaled from the 3090 measurement. Part of every step i
 
 Expected final storage with Option B [estimate]:
 
-| Item | Size |
-|---|---|
-| Fine-tuning checkpoints, 90 × 0.13 GB | 12.0 GB |
-| Pretraining checkpoints, 2 × 5 × 0.20 GB | 2.0 GB |
-| Files of the run in progress | ~1.5 GB |
-| Data | 2.3 GB |
-| Python environment (torch + CUDA libraries + packages) | ~5.5 GB |
-| Logs, predictions, plots, W&B files | < 1 GB |
-| **Total** | **≈ 24 GB final, ≈ 27 GB peak** |
+| Location | Item | Size |
+|---|---|---|
+| `/home/rajivs/tejashmore/results` | Fine-tuning checkpoints, 90 × 0.13 GB | 12.0 GB |
+| `/home/rajivs/tejashmore/results` | Pretraining checkpoints, 2 × 5 × 0.20 GB | 2.0 GB |
+| `/home/rajivs/tejashmore/results` | Files of the run in progress | ~1.5 GB |
+| `/home/rajivs/tejashmore/results`, `logs` | Logs, predictions, plots, W&B files | < 1 GB |
+| `/home/rajivs/tejashmore/envs` | Python environment (torch + CUDA libraries + packages) | ~5.5 GB |
+| `/home/rajivs/tejashmore/dlnlp` | Code | ~2 MB |
+| **home total** | | **≈ 22 GB final, ≈ 25 GB peak** |
+| scratch `tejash_temp` | Datasets, tokenizer, manifest, checksums | 2.3 GB |
+| **scratch total** | | **≈ 2.3 GB** |
 
 Without any of this it would be about 205 GB. With only `keep_last_checkpoints=0`, about 86 GB.
 
-### 12.3 Job script
+### 12.3 Cluster layout and job script
 
-```bash
-OUT=/path/to/results
-DATA=/path/to/longdoc-data            # keep this exact path for every resubmission
-( while true; do python scripts/compact_finished.py $OUT/linformer/main; sleep 600; done ) &
-CLEANER=$!
+Data and everything else are kept apart:
 
-run_experiment --experiment linformer --run-id main \
-  --data-dir $DATA --output-dir $OUT \
-  --device cuda --wandb-mode offline \
-  --set train.gradient_checkpointing=false \
-  --set train.num_workers=8 \
-  --set runtime.keep_last_checkpoints=0
+| Path | Contents |
+|---|---|
+| `DATA=/scratch/users/rajivs/datasets_rajivs/tejash_temp` | **data only** (`--data-dir`): `datasets/`, `tokenizer/`, `manifest.json`, `SHA256SUMS`, copied from the local machine |
+| `WORK=/home/rajivs/tejashmore` | everything else |
+| `$WORK/dlnlp` | the code (all commands are run from here) |
+| `$WORK/envs/longdoc` | the conda environment (Python 3.10, torch 2.5.1 + cu121) |
+| `$WORK/results` | `--output-dir`; the suite writes to `$WORK/results/linformer/main/` |
+| `$WORK/logs` | Slurm job logs |
 
-kill $CLEANER; python scripts/compact_finished.py $OUT/linformer/main
-```
+The job script is `scripts/linformer_kaic.sbatch`. Its Slurm settings:
+- one GPU, 12 CPU cores, 32 GB RAM, 48 h;
+- `--signal=B:USR1@180` (a warning 3 minutes before the time limit);
+- `--partition` must be set to KAIC's ADA6000 partition.
 
-If KAIC uses Slurm, add `#SBATCH --signal=B:USR1@120`. The code catches SIGUSR1 and SIGTERM, saves a checkpoint and exits cleanly; Ctrl-C (SIGINT) does the same.
+It does the following:
+1. Activates the environment and `cd`s into the code folder. This is required, because `configs/base.yaml` and `scripts/` are relative paths.
+2. Starts the Option B cleaner loop (`scripts/compact_finished.py` every 10 minutes).
+3. Runs:
+   ```bash
+   run_experiment --experiment linformer --run-id main --data-dir $DATA --output-dir $WORK/results \
+     --device cuda --wandb-mode offline --set train.gradient_checkpointing=false \
+     --set train.num_workers=8 --set runtime.keep_last_checkpoints=0
+   ```
+4. **Forwards Slurm's warning signal** to the experiment. With `B:`, Slurm signals only the batch script, so the script traps USR1/TERM and sends USR1 to the Python process. The experiment then saves a checkpoint and exits.
+5. Runs a final cleanup and prints the checklist.
+
+Tested by simulation [measured]: sending USR1 to the script produced "Received SIGUSR1; checkpoint saved" and a manifest marked `interrupted`. Re-running the same script resumed pretraining "at step 31".
+
+The code also handles SIGTERM, and Ctrl-C (SIGINT), the same way.
+
+**One-time check job.** Before the real run, `scripts/linformer_kaic_check.sbatch` (1 h limit, same partition) runs inside Slurm, so nothing runs on the login node. It checks four things:
+- the GPU and PyTorch;
+- the transferred data's checksums and split sizes;
+- the 55 unit tests;
+- a ~10-minute smoke run of the whole Linformer suite with `configs/quick.yaml`. It should end with "Progress: 29/29"; its accuracies are meaningless.
+
+Verified locally against a fresh copy of the data folder [measured].
 
 ### 12.4 Resuming after a time limit or crash
 
@@ -654,7 +685,7 @@ Re-run **exactly the same command**. The manifest skips finished jobs, and the r
 4. **Checkpoints are never cleaned up** (~205 GB). Option B solves this.
 5. **The built-in low-disk check looks at the wrong number.** `min_free_disk_gb` checks the filesystem's free space, not the user's quota, so it will not warn before a quota is hit.
 6. **W&B is online by default.** On compute nodes without internet, each of the ~110 runs can stall waiting for W&B. Use `--wandb-mode offline` or `--no-wandb`.
-7. **Data preparation needs internet** and writes 1.3 GB into `~/.cache/huggingface` in addition to the data folder. Prepare it on a login node or copy prepared data.
+7. **Data preparation needs internet** and writes 1.3 GB into `~/.cache/huggingface` in addition to the data folder. In Tejash's setup it is done on the local machine and the prepared folder is copied to the cluster (section 12.2).
 8. **The compute curve's 200M point repeats the main `fixed` runs** (wasted ~1.7 h). Removing it needs a small code change.
 9. **Never use `--cell` mode for Linformer variants; use `--experiment linformer`.** In `--cell` mode:
    - (a) `--set` values for model settings that a cell defines (`projection_type`, `exact_cls`) are silently overwritten by the cell's own values. For example, `--set model.projection_type=mean` just runs `resampled`.
